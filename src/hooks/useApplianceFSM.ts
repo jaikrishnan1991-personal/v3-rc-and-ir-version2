@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import {
+  AMBIENT_TEMP_C,
   ApplianceMode,
   ApplianceState,
   ButtonId,
@@ -30,6 +31,9 @@ interface State {
   // running
   remainingSec: number;
   progressPct: number;
+  totalSec: number;
+  liveTempA: number;
+  liveTempB: number;
   // misc
   wifi: WifiState;
   zone: Zone;
@@ -40,13 +44,14 @@ interface State {
 }
 
 type Action =
-  | { type: "TICK"; now: number; lockHeld: boolean }
+  | { type: "TICK_SLOW" }
+  | { type: "TICK_TEMP" }
+  | { type: "TICK_BOOT" }
   | { type: "BOOT_DONE" }
   | { type: "WIFI"; wifi: WifiState }
   | { type: "PRESS"; btn: ButtonId }
   | { type: "INJECT_ERROR"; code: ErrorCode }
   | { type: "CLEAR_ERROR" }
-  | { type: "SET_LOCK_HOLD"; ts: number | null }
   | { type: "SET_LOCK_PROGRESS"; v: number }
   | { type: "ENTER_LOCK" }
   | { type: "EXIT_LOCK" }
@@ -60,13 +65,16 @@ const initial: State = {
   selectedModeId: null,
   temp: 200,
   timeSec: 300,
-  quantity: 2,
-  thickness: 2,
-  oil: 2,
+  quantity: 1,
+  thickness: 3,
+  oil: 1,
   manualField: "TEMP",
   autoField: "QTY",
   remainingSec: 0,
   progressPct: 0,
+  totalSec: 0,
+  liveTempA: AMBIENT_TEMP_C,
+  liveTempB: AMBIENT_TEMP_C,
   wifi: "SEARCHING",
   zone: "A",
   childLockHoldStart: null,
@@ -84,6 +92,9 @@ const MANUAL_FIELDS: ManualField[] = ["TEMP", "TIME", "ZONE"];
 const AUTO_FIELDS_FORCED: AutoField[] = ["QTY", "THICK", "OIL"]; // Dosa/Crepe — zone locked to BOTH
 const AUTO_FIELDS_FULL: AutoField[] = ["QTY", "THICK", "OIL", "ZONE"];
 
+const isForcedZoneMode = (m: ApplianceMode | null) =>
+  !!m && (m.id === "dosa" || m.id === "crepe");
+
 const cycleZone = (z: Zone, dir: 1 | -1): Zone => {
   const order: Zone[] = ["A", "B", "BOTH"];
   const i = order.indexOf(z);
@@ -91,27 +102,58 @@ const cycleZone = (z: Zone, dir: 1 | -1): Zone => {
   return order[n];
 };
 
+// Realistic ramp toward target with small jitter
+const rampTemp = (current: number, target: number | null): number => {
+  if (target == null) {
+    // cool toward ambient
+    const delta = AMBIENT_TEMP_C - current;
+    return current + Math.sign(delta) * Math.min(Math.abs(delta), 1.2);
+  }
+  const delta = target - current;
+  if (Math.abs(delta) < 2.5) {
+    // hold near target with ±2°C jitter
+    return target + (Math.random() * 4 - 2);
+  }
+  // Climb ~3-6°C/s when far, slowing as we approach
+  const rate = clamp(Math.abs(delta) * 0.08, 1.5, 6);
+  return current + Math.sign(delta) * rate + (Math.random() * 1.2 - 0.6);
+};
+
 function reducer(s: State, a: Action): State {
   switch (a.type) {
-    case "TICK": {
-      if (s.state === "BOOT") {
-        const next = Math.min(100, s.bootProgress + 4);
-        return { ...s, bootProgress: next };
-      }
+    case "TICK_BOOT": {
+      const next = Math.min(100, s.bootProgress + 5);
+      return { ...s, bootProgress: next };
+    }
+    case "TICK_SLOW": {
       if (s.state === "RUNNING") {
         const mode = getMode(s.selectedModeId);
         if (mode?.kind === "MANUAL") {
           const next = Math.max(0, s.remainingSec - 1);
-          if (next === 0) return { ...s, remainingSec: 0, state: "DONE" };
-          return { ...s, remainingSec: next };
+          const pct = s.totalSec > 0 ? Math.round(((s.totalSec - next) / s.totalSec) * 100) : 0;
+          if (next === 0) return { ...s, remainingSec: 0, progressPct: 100, state: "DONE" };
+          return { ...s, remainingSec: next, progressPct: pct };
         }
         if (mode?.kind === "AUTO") {
           const next = Math.min(100, s.progressPct + 2);
-          if (next >= 100) return { ...s, progressPct: 100, state: "DONE" };
-          return { ...s, progressPct: next };
+          const remaining = Math.max(0, s.remainingSec - 1);
+          if (next >= 100) return { ...s, progressPct: 100, remainingSec: 0, state: "DONE" };
+          return { ...s, progressPct: next, remainingSec: remaining };
         }
       }
       return s;
+    }
+    case "TICK_TEMP": {
+      // Live temperature simulation
+      const targetA =
+        s.state === "RUNNING" && (s.zone === "A" || s.zone === "BOTH") ? s.temp : null;
+      const targetB =
+        s.state === "RUNNING" && (s.zone === "B" || s.zone === "BOTH") ? s.temp : null;
+      return {
+        ...s,
+        liveTempA: rampTemp(s.liveTempA, targetA),
+        liveTempB: rampTemp(s.liveTempB, targetB),
+      };
     }
     case "BOOT_DONE":
       return { ...s, state: "MENU", bootProgress: 100 };
@@ -125,8 +167,6 @@ function reducer(s: State, a: Action): State {
       return { ...s, prevState: s.state, state: "ERROR", error: a.code };
     case "CLEAR_ERROR":
       return { ...s, state: s.prevState ?? "MENU", error: null, prevState: null };
-    case "SET_LOCK_HOLD":
-      return { ...s, childLockHoldStart: a.ts };
     case "SET_LOCK_PROGRESS":
       return { ...s, childLockProgress: a.v };
     case "ENTER_LOCK":
@@ -143,13 +183,19 @@ function reducer(s: State, a: Action): State {
       }
       switch (a.btn) {
         case "POWER":
-          return { ...s, state: "MENU", selectedModeId: null, remainingSec: 0, progressPct: 0 };
+          return {
+            ...s,
+            state: "MENU",
+            selectedModeId: null,
+            remainingSec: 0,
+            progressPct: 0,
+            totalSec: 0,
+            liveTempA: AMBIENT_TEMP_C,
+            liveTempB: AMBIENT_TEMP_C,
+          };
         case "UP":
         case "DOWN": {
           const dir = a.btn === "UP" ? -1 : 1;
-          if (s.state === "MENU") {
-            return { ...s, cursorIndex: (s.cursorIndex + dir + MODES.length) % MODES.length };
-          }
           if (s.state === "MANUAL_SETUP") {
             const i = MANUAL_FIELDS.indexOf(s.manualField);
             const n = (i + dir + MANUAL_FIELDS.length) % MANUAL_FIELDS.length;
@@ -157,7 +203,7 @@ function reducer(s: State, a: Action): State {
           }
           if (s.state === "AUTO_SETUP") {
             const mode = getMode(s.selectedModeId);
-            const fields = mode && (mode.id === "dosa" || mode.id === "crepe") ? AUTO_FIELDS_FORCED : AUTO_FIELDS_FULL;
+            const fields = isForcedZoneMode(mode) ? AUTO_FIELDS_FORCED : AUTO_FIELDS_FULL;
             const i = Math.max(0, fields.indexOf(s.autoField));
             const n = (i + dir + fields.length) % fields.length;
             return { ...s, autoField: fields[n] };
@@ -167,15 +213,19 @@ function reducer(s: State, a: Action): State {
         case "LEFT":
         case "RIGHT": {
           const dir = a.btn === "LEFT" ? -1 : 1;
+          if (s.state === "MENU") {
+            // Horizontal menu navigation (V2)
+            return { ...s, cursorIndex: (s.cursorIndex + dir + MODES.length) % MODES.length };
+          }
           if (s.state === "MANUAL_SETUP") {
             const mode = getMode(s.selectedModeId);
             if (!mode) return s;
             if (s.manualField === "TEMP") {
-              const r = mode.ranges?.temp ?? [60, 280, 5];
+              const r = mode.ranges?.temp ?? [80, 300, 5];
               return { ...s, temp: clamp(s.temp + dir * r[2], r[0], r[1]) };
             }
             if (s.manualField === "TIME") {
-              const r = mode.ranges?.timeSec ?? [30, 3600, 30];
+              const r = mode.ranges?.timeSec ?? [15, 99 * 60 + 45, 15];
               return { ...s, timeSec: clamp(s.timeSec + dir * r[2], r[0], r[1]) };
             }
             if (s.manualField === "ZONE") {
@@ -186,18 +236,17 @@ function reducer(s: State, a: Action): State {
           if (s.state === "AUTO_SETUP") {
             const mode = getMode(s.selectedModeId);
             if (!mode) return s;
-            // Dosa/Crepe: zone forced to BOTH
-            if ((mode.id === "dosa" || mode.id === "crepe") && s.autoField === "ZONE") return s;
+            if (isForcedZoneMode(mode) && s.autoField === "ZONE") return s;
             if (s.autoField === "QTY") {
-              const r = mode.ranges?.quantity ?? [1, 6, 1];
+              const r = mode.ranges?.quantity ?? [1, 99, 1];
               return { ...s, quantity: clamp(s.quantity + dir * r[2], r[0], r[1]) };
             }
             if (s.autoField === "THICK") {
-              const r = mode.ranges?.thickness ?? [1, 3, 1];
+              const r = mode.ranges?.thickness ?? [1, 5, 1];
               return { ...s, thickness: clamp(s.thickness + dir * r[2], r[0], r[1]) };
             }
             if (s.autoField === "OIL") {
-              const r = mode.ranges?.oil ?? [1, 3, 1];
+              const r = mode.ranges?.oil ?? [0, 3, 1];
               return { ...s, oil: clamp(s.oil + dir * r[2], r[0], r[1]) };
             }
             if (s.autoField === "ZONE") {
@@ -209,7 +258,7 @@ function reducer(s: State, a: Action): State {
         case "SELECT": {
           if (s.state === "MENU") {
             const mode = MODES[s.cursorIndex];
-            const forcedZone: Zone | null = (mode.id === "dosa" || mode.id === "crepe") ? "BOTH" : null;
+            const forcedZone: Zone | null = isForcedZoneMode(mode) ? "BOTH" : null;
             return {
               ...s,
               selectedModeId: mode.id,
@@ -220,7 +269,7 @@ function reducer(s: State, a: Action): State {
               oil: mode.defaults.oil ?? s.oil,
               manualField: "TEMP",
               autoField: "QTY",
-              zone: forcedZone ?? s.zone,
+              zone: forcedZone ?? (s.zone === "BOTH" ? "A" : s.zone),
               state: mode.kind === "AUTO" ? "AUTO_SETUP" : "MANUAL_SETUP",
             };
           }
@@ -231,16 +280,44 @@ function reducer(s: State, a: Action): State {
             return { ...s, state: "MENU", selectedModeId: null };
           }
           if (s.state === "RUNNING" || s.state === "PAUSED" || s.state === "DONE") {
-            return { ...s, state: "MENU", selectedModeId: null, remainingSec: 0, progressPct: 0 };
+            return {
+              ...s,
+              state: "MENU",
+              selectedModeId: null,
+              remainingSec: 0,
+              progressPct: 0,
+              totalSec: 0,
+              liveTempA: AMBIENT_TEMP_C,
+              liveTempB: AMBIENT_TEMP_C,
+            };
           }
           return s;
         }
         case "START": {
           if (s.state === "MANUAL_SETUP") {
-            return { ...s, state: "RUNNING", remainingSec: s.timeSec, progressPct: 0 };
+            return {
+              ...s,
+              state: "RUNNING",
+              remainingSec: s.timeSec,
+              totalSec: s.timeSec,
+              progressPct: 0,
+              liveTempA: AMBIENT_TEMP_C,
+              liveTempB: AMBIENT_TEMP_C,
+            };
           }
           if (s.state === "AUTO_SETUP") {
-            return { ...s, state: "RUNNING", progressPct: 0, remainingSec: 0 };
+            // estimated cycle time ~ 50s — drives temp ramp visualisation
+            const est = 50;
+            return {
+              ...s,
+              state: "RUNNING",
+              progressPct: 0,
+              remainingSec: est,
+              totalSec: est,
+              temp: 220, // implicit auto target
+              liveTempA: AMBIENT_TEMP_C,
+              liveTempB: AMBIENT_TEMP_C,
+            };
           }
           if (s.state === "PAUSED") return { ...s, state: "RUNNING" };
           return s;
@@ -268,25 +345,33 @@ export function useApplianceFSM() {
   const lockStartRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
 
+  // Boot sequence — explicit 2s splash
   useEffect(() => {
-    const t1 = setTimeout(() => dispatch({ type: "WIFI", wifi: "CONNECTED" }), 1800);
-    const t2 = setTimeout(() => dispatch({ type: "BOOT_DONE" }), 2400);
+    const t1 = setTimeout(() => dispatch({ type: "WIFI", wifi: "CONNECTED" }), 1400);
+    const t2 = setTimeout(() => dispatch({ type: "BOOT_DONE" }), 2000);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      dispatch({ type: "TICK", now: Date.now(), lockHeld: false });
-    }, 1000);
-    return () => clearInterval(id);
-  }, []);
-
+  // Boot progress bar
   useEffect(() => {
     if (state.state !== "BOOT") return;
-    const id = setInterval(() => dispatch({ type: "TICK", now: Date.now(), lockHeld: false }), 80);
+    const id = setInterval(() => dispatch({ type: "TICK_BOOT" }), 100);
     return () => clearInterval(id);
   }, [state.state]);
 
+  // 1Hz cycle tick
+  useEffect(() => {
+    const id = setInterval(() => dispatch({ type: "TICK_SLOW" }), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // 4Hz live temperature tick
+  useEffect(() => {
+    const id = setInterval(() => dispatch({ type: "TICK_TEMP" }), 250);
+    return () => clearInterval(id);
+  }, []);
+
+  // Auto-clear errors with autoClearMs
   useEffect(() => {
     if (state.state !== "ERROR" || !state.error) return;
     const def = ERROR_DETAILS[state.error];
@@ -296,6 +381,7 @@ export function useApplianceFSM() {
     }
   }, [state.state, state.error]);
 
+  // Child-lock hold detection
   useEffect(() => {
     const loop = () => {
       const both = downRef.current.BACK && downRef.current.PAUSE;

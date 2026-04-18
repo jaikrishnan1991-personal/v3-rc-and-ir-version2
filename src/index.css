@@ -190,4 +190,32 @@
     0%, 100% { opacity: 0.3; }
     50% { opacity: 1; }
   }
+
+  /* V2 — animated icon embellishments */
+  .anim-steam {
+    animation: steam-rise 2.4s ease-in-out infinite;
+    transform-origin: center;
+  }
+  @keyframes steam-rise {
+    0%   { transform: translateY(2px); opacity: 0.2; }
+    40%  { opacity: 0.9; }
+    100% { transform: translateY(-10px); opacity: 0; }
+  }
+
+  .anim-sizzle {
+    animation: sizzle 0.6s steps(2, end) infinite;
+  }
+  @keyframes sizzle {
+    0%, 100% { opacity: 1; transform: translateY(0); }
+    50%      { opacity: 0.4; transform: translateY(-2px); }
+  }
+
+  .anim-swim {
+    animation: swim 1.6s ease-in-out infinite;
+    transform-origin: 32px 32px;
+  }
+  @keyframes swim {
+    0%, 100% { transform: translateX(-1px) rotate(-2deg); }
+    50%      { transform: translateX(1px) rotate(2deg); }
+  }
 }
