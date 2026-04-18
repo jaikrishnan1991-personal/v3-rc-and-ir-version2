@@ -24,8 +24,8 @@ export interface ApplianceMode {
     timeSec?: number;
     // auto
     quantity?: number;
-    thickness?: number; // 1-3
-    oil?: number;       // 1-3
+    thickness?: number; // 1-5
+    oil?: number;       // 0-3 -> None/Low/Med/High
   };
   ranges?: {
     temp?: [number, number, number]; // min,max,step
@@ -36,78 +36,85 @@ export interface ApplianceMode {
   };
 }
 
+// V2 ranges:
+// Manual: Temp 80-300°C step 5; Time 15s..99*60+45s, step 15s
+// Auto:   Qty 1-99; Thickness 1-5; Oil 0-3 (None/Low/Med/High)
+const MANUAL_RANGES = {
+  temp: [80, 300, 5] as [number, number, number],
+  timeSec: [15, 99 * 60 + 45, 15] as [number, number, number],
+};
+const AUTO_RANGES = {
+  quantity: [1, 99, 1] as [number, number, number],
+  thickness: [1, 5, 1] as [number, number, number],
+  oil: [0, 3, 1] as [number, number, number],
+};
+
+export const OIL_LABELS = ["None", "Low", "Med", "High"] as const;
+
 export const MODES: ApplianceMode[] = [
   {
     id: "dosa",
     name: "Dosa",
     kind: "AUTO",
     icon: "dosa",
-    defaults: { quantity: 2, thickness: 2, oil: 2 },
-    ranges: {
-      quantity: [1, 6, 1],
-      thickness: [1, 3, 1],
-      oil: [1, 3, 1],
-    },
+    defaults: { quantity: 1, thickness: 3, oil: 1 },
+    ranges: AUTO_RANGES,
   },
   {
     id: "crepe",
     name: "Crepe",
     kind: "AUTO",
     icon: "crepe",
-    defaults: { quantity: 2, thickness: 1, oil: 1 },
-    ranges: {
-      quantity: [1, 6, 1],
-      thickness: [1, 3, 1],
-      oil: [1, 3, 1],
-    },
+    defaults: { quantity: 1, thickness: 1, oil: 1 },
+    ranges: AUTO_RANGES,
   },
   {
     id: "steak",
     name: "Steak",
     kind: "MANUAL",
     icon: "steak",
-    defaults: { temp: 220, timeSec: 480 },
-    ranges: { temp: [60, 280, 5], timeSec: [30, 3600, 30] },
+    defaults: { temp: 220, timeSec: 8 * 60 },
+    ranges: MANUAL_RANGES,
   },
   {
     id: "chicken",
     name: "Chicken",
     kind: "MANUAL",
     icon: "chicken",
-    defaults: { temp: 200, timeSec: 720 },
-    ranges: { temp: [60, 280, 5], timeSec: [30, 3600, 30] },
+    defaults: { temp: 200, timeSec: 12 * 60 },
+    ranges: MANUAL_RANGES,
   },
   {
     id: "burger",
     name: "Burger",
     kind: "MANUAL",
     icon: "burger",
-    defaults: { temp: 210, timeSec: 360 },
-    ranges: { temp: [60, 280, 5], timeSec: [30, 3600, 30] },
+    defaults: { temp: 210, timeSec: 6 * 60 },
+    ranges: MANUAL_RANGES,
   },
   {
     id: "fish",
     name: "Fish",
     kind: "MANUAL",
     icon: "fish",
-    defaults: { temp: 180, timeSec: 300 },
-    ranges: { temp: [60, 280, 5], timeSec: [30, 3600, 30] },
+    defaults: { temp: 180, timeSec: 5 * 60 },
+    ranges: MANUAL_RANGES,
   },
   {
     id: "sandwich",
     name: "Sandwich",
     kind: "MANUAL",
     icon: "sandwich",
-    defaults: { temp: 190, timeSec: 240 },
-    ranges: { temp: [60, 280, 5], timeSec: [30, 3600, 30] },
+    defaults: { temp: 190, timeSec: 4 * 60 },
+    ranges: MANUAL_RANGES,
   },
   {
     id: "hotdog",
     name: "Hotdog",
     kind: "MANUAL",
     icon: "hotdog",
-    defaults: { temp: 180, timeSec: 180 },
-    ranges: { temp: [60, 280, 5], timeSec: [30, 3600, 30] },
+    defaults: { temp: 180, timeSec: 3 * 60 },
+    ranges: MANUAL_RANGES,
   },
 ];
 
@@ -148,3 +155,5 @@ export type ButtonId =
   | "SELECT";
 
 export type Zone = "A" | "B" | "BOTH";
+
+export const AMBIENT_TEMP_C = 25;

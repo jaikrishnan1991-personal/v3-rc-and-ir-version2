@@ -86,7 +86,10 @@ export const AppliancePanel = ({ onApiReady }: Props) => {
                   mode={mode}
                   paused={state.state === "PAUSED"}
                   done={state.state === "DONE"}
+                  zone={state.zone}
                   temp={state.temp}
+                  liveTempA={state.liveTempA}
+                  liveTempB={state.liveTempB}
                   remainingSec={state.remainingSec}
                   progressPct={state.progressPct}
                 />

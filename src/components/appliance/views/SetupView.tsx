@@ -1,5 +1,5 @@
-import { ApplianceMode, Zone } from "@/lib/appliance-types";
-import { FOOD_ICON_MAP } from "../icons";
+import { ApplianceMode, OIL_LABELS, Zone } from "@/lib/appliance-types";
+import { ANIMATED_ICON_MAP } from "../AnimatedIcons";
 import { ManualField, AutoField } from "@/hooks/useApplianceFSM";
 
 interface ManualProps {
@@ -32,14 +32,14 @@ const fmtTime = (s: number) => {
 const zoneLabel = (z: Zone) => (z === "BOTH" ? "A+B" : z);
 
 export const SetupView = (props: Props) => {
-  const Icon = FOOD_ICON_MAP[props.mode.icon];
+  const Icon = ANIMATED_ICON_MAP[props.mode.icon];
   const isLockedZone = props.kind === "AUTO" && (props.mode.id === "dosa" || props.mode.id === "crepe");
 
   return (
-    <div className="h-full flex items-stretch px-2 py-1 gap-2">
-      <div className="flex flex-col items-center justify-center w-[64px] border-r border-lcd-pixel/30 pr-2">
-        <Icon size={24} />
-        <span className="font-pixel text-[13px] leading-none mt-1 uppercase">{props.mode.name}</span>
+    <div className="h-full flex items-stretch px-2 py-0.5 gap-2">
+      <div className="flex flex-col items-center justify-center w-[78px] border-r border-lcd-pixel/30 pr-2">
+        <Icon size={42} />
+        <span className="font-pixel text-[13px] leading-none mt-0.5 uppercase">{props.mode.name}</span>
         <span className="font-pixel text-[9px] leading-none mt-0.5 opacity-70">▲▼ FIELD</span>
       </div>
       <div className="flex-1 grid grid-cols-4 gap-1 items-center font-pixel">
@@ -55,12 +55,12 @@ export const SetupView = (props: Props) => {
             <Param label="QTY" value={`${props.quantity}`} active={props.field === "QTY"} />
             <Param
               label="THICK"
-              value={"▮".repeat(props.thickness) + "▯".repeat(3 - props.thickness)}
+              value={"▮".repeat(props.thickness) + "▯".repeat(5 - props.thickness)}
               active={props.field === "THICK"}
             />
             <Param
               label="OIL"
-              value={"▮".repeat(props.oil) + "▯".repeat(3 - props.oil)}
+              value={OIL_LABELS[props.oil] ?? "—"}
               active={props.field === "OIL"}
             />
             <Param
@@ -100,7 +100,7 @@ const Param = ({
     {label && <span className="text-[11px] leading-none opacity-80">{label}</span>}
     <span
       className={`text-[16px] leading-none my-0.5 ${
-        emphasize ? "lcd-blink" : active ? "lcd-blink" : ""
+        emphasize || active ? "lcd-blink" : ""
       }`}
     >
       {value}
